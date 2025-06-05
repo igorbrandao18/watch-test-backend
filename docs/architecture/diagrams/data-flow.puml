@@ -1,0 +1,39 @@
+@startuml Data Flow
+
+participant "Frontend" as FE
+participant "API Gateway" as AG
+participant "Backend" as BE
+database "Redis Cache" as RC
+database "PostgreSQL" as DB
+participant "TMDb API" as TMDB
+
+== Listagem de Filmes Populares ==
+FE -> AG: GET /movies/popular
+AG -> BE: Roteia requisição
+BE -> RC: Verifica cache
+alt Cache hit
+    RC --> BE: Retorna dados do cache
+else Cache miss
+    BE -> TMDB: Busca filmes populares
+    TMDB --> BE: Retorna dados
+    BE -> RC: Armazena em cache
+end
+BE --> AG: Retorna resposta
+AG --> FE: Retorna dados formatados
+
+== Detalhes do Filme ==
+FE -> AG: GET /movies/{id}
+AG -> BE: Roteia requisição
+BE -> RC: Verifica cache
+alt Cache hit
+    RC --> BE: Retorna dados do cache
+else Cache miss
+    BE -> TMDB: Busca detalhes do filme
+    TMDB --> BE: Retorna dados
+    BE -> RC: Armazena em cache
+end
+BE -> DB: Registra visualização
+BE --> AG: Retorna resposta
+AG --> FE: Retorna dados formatados
+
+@enduml 

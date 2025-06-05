@@ -1,0 +1,26 @@
+@startuml ERD
+
+!define table(x) class x << (T,#FFAAAA) >>
+!define primary_key(x) <u>x</u>
+!define foreign_key(x) #x#
+
+' Entidades
+table(users) {
+  primary_key(id): UUID
+  email: VARCHAR
+  password: VARCHAR
+  created_at: TIMESTAMP
+  updated_at: TIMESTAMP
+}
+
+table(movie_views) {
+  primary_key(id): UUID
+  foreign_key(user_id): UUID
+  movie_id: VARCHAR
+  viewed_at: TIMESTAMP
+}
+
+' Relacionamentos
+users "1" -- "*" movie_views : has >
+
+@enduml 

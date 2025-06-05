@@ -1,14 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { Inject } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import { EventsService } from '../events/events.service';
 import {
   Movie,
-  MovieResponse,
   MovieDetails,
   TMDbError
 } from './interfaces/movie.interface';
@@ -18,6 +16,8 @@ import { PrismaService } from '../common/prisma.service';
 export class MoviesService {
   private readonly apiUrl: string;
   private readonly apiKey: string;
+  private readonly imageBaseUrl: string = 'https://image.tmdb.org/t/p/w500';
+  private readonly CACHE_TTL = 300; // 5 minutes in seconds
 
   constructor(
     private readonly httpService: HttpService,
@@ -42,22 +42,24 @@ export class MoviesService {
     const cachedData = await this.cacheManager.get<Movie[]>(cacheKey);
 
     if (cachedData) {
-      return cachedData;
+      return cachedData.map(movie => ({
+        ...movie,
+        poster_path: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : null,
+        backdrop_path: movie.backdrop_path ? `${this.imageBaseUrl}${movie.backdrop_path}` : null
+      }));
     }
 
     const url = `${this.apiUrl}/movie/popular?api_key=${this.apiKey}&language=pt-BR`;
-    
-    try {
-      const response = await firstValueFrom(
-        this.httpService.get<MovieResponse>(url),
-      );
-      const movies = response.data.results;
-      
-      await this.cacheManager.set(cacheKey, movies, 1800000); // 30 minutes
-      return movies;
-    } catch (error: unknown) {
-      throw new Error('Failed to fetch popular movies from TMDb');
-    }
+    const { data } = await firstValueFrom(this.httpService.get<{ results: Movie[] }>(url));
+
+    const moviesWithFullPaths = data.results.map(movie => ({
+      ...movie,
+      poster_path: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : null,
+      backdrop_path: movie.backdrop_path ? `${this.imageBaseUrl}${movie.backdrop_path}` : null
+    }));
+
+    await this.cacheManager.set(cacheKey, moviesWithFullPaths, this.CACHE_TTL);
+    return moviesWithFullPaths;
   }
 
   async getMovieDetails(id: number): Promise<MovieDetails> {
@@ -65,7 +67,11 @@ export class MoviesService {
     const cachedData = await this.cacheManager.get<MovieDetails>(cacheKey);
 
     if (cachedData) {
-      return cachedData;
+      return {
+        ...cachedData,
+        poster_path: cachedData.poster_path ? `${this.imageBaseUrl}${cachedData.poster_path}` : null,
+        backdrop_path: cachedData.backdrop_path ? `${this.imageBaseUrl}${cachedData.backdrop_path}` : null
+      };
     }
 
     const url = `${this.apiUrl}/movie/${id}?api_key=${this.apiKey}&language=pt-BR`;
@@ -74,13 +80,17 @@ export class MoviesService {
       const response = await firstValueFrom(
         this.httpService.get<MovieDetails>(url),
       );
-      const movie = response.data;
+      const movie = {
+        ...response.data,
+        poster_path: response.data.poster_path ? `${this.imageBaseUrl}${response.data.poster_path}` : null,
+        backdrop_path: response.data.backdrop_path ? `${this.imageBaseUrl}${response.data.backdrop_path}` : null
+      };
       
       if (!movie) {
         throw new NotFoundException('Movie not found');
       }
 
-      await this.cacheManager.set(cacheKey, movie, 3600000); // 1 hour
+      await this.cacheManager.set(cacheKey, movie, this.CACHE_TTL);
       return movie;
     } catch (error: unknown) {
       if (this.isTMDbError(error) && error.response?.status === 404) {
@@ -106,7 +116,7 @@ export class MoviesService {
       );
       const movie = response.data;
 
-      await this.cacheManager.set(cacheKey, movie, 3600000); // 1 hour
+      await this.cacheManager.set(cacheKey, movie, this.CACHE_TTL);
       await this.eventsService.publishMovieViewed(userId, movieId);
 
       return movie;
@@ -116,72 +126,6 @@ export class MoviesService {
       }
       throw error;
     }
-  }
-
-  async getFavorites(userId: string) {
-    return this.prisma.favorite.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
-  async addToFavorites(movieId: string, userId: string) {
-    // Verifica se o filme existe
-    await this.getMovieById(movieId, userId);
-
-    // Verifica se já é favorito
-    const existingFavorite = await this.prisma.favorite.findUnique({
-      where: {
-        userId_movieId: {
-          userId,
-          movieId,
-        },
-      },
-    });
-
-    if (existingFavorite) {
-      return existingFavorite;
-    }
-
-    return this.prisma.favorite.create({
-      data: {
-        userId,
-        movieId,
-      },
-    });
-  }
-
-  async removeFromFavorites(movieId: string, userId: string) {
-    const favorite = await this.prisma.favorite.findUnique({
-      where: {
-        userId_movieId: {
-          userId,
-          movieId,
-        },
-      },
-    });
-
-    if (!favorite) {
-      throw new NotFoundException('Favorite not found');
-    }
-
-    await this.prisma.favorite.delete({
-      where: {
-        userId_movieId: {
-          userId,
-          movieId,
-        },
-      },
-    });
-
-    return { message: 'Favorite removed successfully' };
-  }
-
-  async getViewHistory(userId: string) {
-    return this.prisma.movieView.findMany({
-      where: { userId },
-      orderBy: { viewedAt: 'desc' },
-    });
   }
 
   private isTMDbError(error: unknown): error is TMDbError {

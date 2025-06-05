@@ -1,87 +1,117 @@
-# WatchMe - Cinema Online Backend
+# WatchMe - Cinema Online
 
-Backend service for the WatchMe cinema catalog application, built with NestJS.
+## Sobre o Projeto
+Sistema de catálogo de filmes online com autenticação, integração com TMDb API e recursos de visualização de filmes.
 
-## Features
+## Tecnologias Principais
+- NestJS (Backend Framework)
+- PostgreSQL (Database)
+- Prisma (ORM)
+- Redis (Cache)
+- JWT (Autenticação)
+- TMDb API (Dados dos Filmes)
+- OpenTelemetry (Observabilidade)
 
-- User authentication with JWT
-- Movie catalog integration with TMDb API
-- Favorites and movie view tracking
-- Redis caching
-- Event tracking system
-- PostgreSQL database with Prisma ORM
-
-## Prerequisites
-
-- Node.js (v18 or higher)
+## Pré-requisitos
+- Node.js >= 18
+- Docker e Docker Compose
 - PostgreSQL
 - Redis
-- Docker (optional)
 
-## Environment Setup
-
-1. Copy the example environment file:
-```bash
-cp .env.example .env
+## Variáveis de Ambiente
+Crie um arquivo `.env` na raiz do projeto:
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/watchme?schema=public"
+TMDB_API_URL="https://api.themoviedb.org/3"
+TMDB_API_KEY="sua_chave_api"
+JWT_SECRET="seu_jwt_secret"
+REDIS_URL="redis://localhost:6379"
 ```
 
-2. Update the environment variables in `.env` with your configuration:
-- Database connection
-- JWT secret
-- Redis configuration
-- TMDb API credentials
-- AWS SQS settings (optional)
+## Instalação e Setup
 
-## Installation
-
+1. Clone o repositório:
 ```bash
-# Install dependencies
+git clone [url-do-repositorio]
+cd watch-test-backend
+```
+
+2. Instale as dependências:
+```bash
 npm install
-
-# Generate Prisma client
-npx prisma generate
-
-# Run database migrations
-npx prisma migrate dev
 ```
 
-## Running the Application
-
+3. Inicie os serviços com Docker:
 ```bash
-# Development mode
+docker-compose up -d
+```
+
+4. Execute as migrações do banco:
+```bash
+npx prisma migrate deploy
+```
+
+5. Inicie o servidor:
+```bash
+# Desenvolvimento
 npm run start:dev
 
-# Production mode
+# Produção
 npm run build
 npm run start:prod
 ```
 
-## API Documentation
+## Endpoints da API
 
-Once the application is running, visit:
-- Swagger UI: http://localhost:3000/api
-- API Docs: http://localhost:3000/api-docs
+### Autenticação
+- `POST /auth/register` - Registro de usuário
+- `POST /auth/login` - Login de usuário
 
-## Testing
+### Filmes
+- `GET /movies/popular` - Lista filmes populares
+- `GET /movies/:id` - Detalhes de um filme
+- `GET /movies/views` - Histórico de visualizações
 
+### Saúde da Aplicação
+- `GET /health` - Status da aplicação
+
+## Testes
+
+### Testes Unitários
 ```bash
-# Unit tests
 npm run test
-
-# E2E tests
-npm run test:e2e
-
-# Test coverage
-npm run test:cov
 ```
 
-## Docker Support
-
+### Testes E2E
 ```bash
-# Build and run with Docker Compose
-docker-compose up -d
+npm run test:e2e
 ```
 
-## License
+### Testes de Carga
+```bash
+npm run test:k6
+```
 
-[MIT licensed](LICENSE)
+## Observabilidade
+
+O sistema utiliza OpenTelemetry para tracing distribuído, com logs estruturados incluindo:
+- trace_id
+- span_id
+- Métricas de latência
+- Status de requisições
+
+## Cache
+
+O sistema implementa estratégia de cache com Redis para:
+- Filmes populares (TTL: 5 minutos)
+- Detalhes de filmes (TTL: 5 minutos)
+
+## Documentação da API
+A documentação Swagger está disponível em `/api` quando o servidor está rodando.
+
+## Contribuição
+1. Faça o fork do projeto
+2. Crie sua feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request

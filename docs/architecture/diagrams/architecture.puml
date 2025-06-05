@@ -1,0 +1,28 @@
+@startuml Architecture
+
+!include <C4/C4_Container>
+
+Person(user, "User", "Um usuário do sistema")
+
+System_Boundary(watchme, "WatchMe System") {
+    Container(frontend, "Frontend", "Vue.js", "Interface do usuário")
+    
+    Container(api_gateway, "API Gateway", "AWS ALB", "Load balancer e roteamento")
+    
+    Container(backend, "Backend Service", "NestJS + Node.js", "Serviço principal da aplicação")
+    
+    ContainerDb(postgres, "Database", "PostgreSQL", "Armazena dados de usuários e visualizações")
+    
+    ContainerDb(redis, "Cache", "Redis", "Cache de dados de filmes")
+    
+    Container(tmdb, "TMDb API", "External API", "Fonte de dados de filmes")
+}
+
+Rel(user, frontend, "Usa", "HTTPS")
+Rel(frontend, api_gateway, "Chama API", "HTTPS")
+Rel(api_gateway, backend, "Roteia requisições", "HTTPS")
+Rel(backend, postgres, "Lê/Escreve", "TCP")
+Rel(backend, redis, "Lê/Escreve", "TCP")
+Rel(backend, tmdb, "Busca dados", "HTTPS")
+
+@enduml 

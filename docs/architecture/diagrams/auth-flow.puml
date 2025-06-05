@@ -1,0 +1,34 @@
+@startuml Auth Flow
+
+actor User
+participant "Frontend" as FE
+participant "Backend" as BE
+database "Database" as DB
+
+== Login ==
+User -> FE: Envia credenciais
+FE -> BE: POST /auth/login
+BE -> DB: Busca usuário
+DB --> BE: Retorna dados
+BE -> BE: Valida senha
+BE -> BE: Gera JWT
+BE --> FE: Retorna token
+FE -> FE: Armazena token
+FE --> User: Redireciona para home
+
+== Requisição Autenticada ==
+User -> FE: Solicita dados
+FE -> FE: Adiciona token no header
+FE -> BE: GET /api/resource
+BE -> BE: Valida JWT
+BE --> FE: Retorna dados
+FE --> User: Exibe dados
+
+== Refresh Token ==
+FE -> BE: Token expirado
+BE -> BE: Valida refresh token
+BE -> BE: Gera novo JWT
+BE --> FE: Retorna novo token
+FE -> FE: Atualiza token
+
+@enduml 

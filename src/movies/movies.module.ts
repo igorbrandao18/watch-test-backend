@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { MoviesService } from './movies.service';
 import { MoviesController } from './movies.controller';
 import { ConfigModule } from '@nestjs/config';
+import { RedisCacheModule } from '../cache/cache.module';
 import { EventsModule } from '../events/events.module';
 import { PrismaService } from '../common/prisma.service';
 
@@ -10,6 +11,7 @@ import { PrismaService } from '../common/prisma.service';
   imports: [
     HttpModule,
     ConfigModule,
+    RedisCacheModule,
     EventsModule,
   ],
   providers: [MoviesService, PrismaService],

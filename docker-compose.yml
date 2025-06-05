@@ -17,7 +17,7 @@ services:
       - jaeger
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     ports:
       - "5432:5432"
     environment:
@@ -31,14 +31,17 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
 
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
       - "16686:16686"
-      - "14268:14268"
       - "4317:4317"
       - "4318:4318"
 
 volumes:
-  postgres_data: 
+  postgres_data:
+  redis_data: 
