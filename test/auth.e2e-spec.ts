@@ -2,134 +2,132 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/common/prisma.service';
+import { setupTestDatabase, cleanupTestDatabase } from './helpers';
+import { v4 as uuid } from 'uuid';
 
 describe('AuthController (e2e)', () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let authToken: string;
 
   beforeAll(async () => {
+    await setupTestDatabase();
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    prisma = app.get(PrismaService);
     await app.init();
   });
 
-  beforeEach(async () => {
-    await prisma.user.deleteMany();
+  afterAll(async () => {
+    await app.close();
+    await cleanupTestDatabase();
   });
 
-  afterAll(async () => {
-    await prisma.user.deleteMany();
-    await prisma.$disconnect();
-    await app.close();
+  const generateTestUser = () => ({
+    email: `test.${uuid()}@example.com`,
+    password: 'password123',
   });
 
   describe('POST /auth/register', () => {
-    const registerDto = {
-      email: 'test@example.com',
-      password: 'password123',
-    };
-
     it('should register a new user', () => {
+      const user = generateTestUser();
       return request(app.getHttpServer())
         .post('/auth/register')
-        .send(registerDto)
+        .send(user)
         .expect(201)
         .expect((res) => {
           expect(res.body).toHaveProperty('id');
-          expect(res.body).toHaveProperty('email', registerDto.email);
+          expect(res.body).toHaveProperty('email', user.email);
           expect(res.body).not.toHaveProperty('password');
         });
     });
 
     it('should not register a user with existing email', async () => {
+      const user = generateTestUser();
       await request(app.getHttpServer())
         .post('/auth/register')
-        .send(registerDto)
+        .send(user)
         .expect(201);
 
       return request(app.getHttpServer())
         .post('/auth/register')
-        .send(registerDto)
+        .send(user)
         .expect(409);
     });
 
     it('should not register a user with invalid email', () => {
       return request(app.getHttpServer())
         .post('/auth/register')
-        .send({ ...registerDto, email: 'invalid-email' })
+        .send({ email: 'invalid-email', password: 'password123' })
         .expect(400);
     });
 
     it('should not register a user with short password', () => {
+      const user = generateTestUser();
       return request(app.getHttpServer())
         .post('/auth/register')
-        .send({ ...registerDto, password: '123' })
+        .send({ ...user, password: '12345' })
         .expect(400);
     });
   });
 
   describe('POST /auth/login', () => {
-    const userDto = {
-      email: 'test@example.com',
-      password: 'password123',
-    };
+    let testUser;
 
     beforeEach(async () => {
+      testUser = generateTestUser();
+      // Create a test user for login tests
       await request(app.getHttpServer())
         .post('/auth/register')
-        .send(userDto);
+        .send(testUser);
     });
 
-    it('should login with valid credentials', () => {
-      return request(app.getHttpServer())
+    it('should login with valid credentials', async () => {
+      const response = await request(app.getHttpServer())
         .post('/auth/login')
-        .send(userDto)
-        .expect(200)
-        .expect((res) => {
-          expect(res.body).toHaveProperty('access_token');
-          expect(res.body).toHaveProperty('user');
-          expect(res.body.user).toHaveProperty('email', userDto.email);
-          expect(res.body.user).not.toHaveProperty('password');
-        });
+        .send(testUser)
+        .expect(200);
+
+      expect(response.body).toHaveProperty('access_token');
+      expect(response.body).toHaveProperty('user');
+      expect(response.body.user).toHaveProperty('email', testUser.email);
+      expect(response.body.user).not.toHaveProperty('password');
+
+      authToken = response.body.access_token;
     });
 
     it('should not login with wrong password', () => {
       return request(app.getHttpServer())
         .post('/auth/login')
-        .send({ ...userDto, password: 'wrongpassword' })
+        .send({ ...testUser, password: 'wrongpassword' })
         .expect(401);
     });
 
     it('should not login with non-existent email', () => {
       return request(app.getHttpServer())
         .post('/auth/login')
-        .send({ ...userDto, email: 'nonexistent@example.com' })
+        .send({ email: 'nonexistent@example.com', password: testUser.password })
         .expect(401);
     });
   });
 
   describe('GET /auth/profile', () => {
-    let authToken: string;
-    const userDto = {
-      email: 'test@example.com',
-      password: 'password123',
-    };
+    let testUser;
 
     beforeEach(async () => {
+      testUser = generateTestUser();
+      // Create a test user and get token
       await request(app.getHttpServer())
         .post('/auth/register')
-        .send(userDto);
+        .send(testUser);
 
-      const loginResponse = await request(app.getHttpServer())
+      const response = await request(app.getHttpServer())
         .post('/auth/login')
-        .send(userDto);
+        .send(testUser);
 
-      authToken = loginResponse.body.access_token;
+      authToken = response.body.access_token;
     });
 
     it('should get user profile with valid token', () => {
@@ -138,7 +136,7 @@ describe('AuthController (e2e)', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200)
         .expect((res) => {
-          expect(res.body).toHaveProperty('email', userDto.email);
+          expect(res.body).toHaveProperty('email', testUser.email);
           expect(res.body).not.toHaveProperty('password');
         });
     });
@@ -152,7 +150,7 @@ describe('AuthController (e2e)', () => {
     it('should not get profile with invalid token', () => {
       return request(app.getHttpServer())
         .get('/auth/profile')
-        .set('Authorization', 'Bearer invalid.token.here')
+        .set('Authorization', 'Bearer invalid-token')
         .expect(401);
     });
   });

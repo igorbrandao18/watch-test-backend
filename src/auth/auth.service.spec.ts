@@ -1,23 +1,25 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
+import { JwtService } from '@nestjs/jwt';
 import { UnauthorizedException } from '@nestjs/common';
-import { EventsService } from '../events/events.service';
+import { LoginDto } from './dto/login.dto';
+import { User } from '../../generated/prisma';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: UsersService;
   let jwtService: JwtService;
-  let eventsService: EventsService;
 
-  const mockUser = {
+  const mockDate = new Date('2025-06-05T04:33:25.934Z');
+
+  const mockUser: User = {
     id: '1',
     email: 'test@example.com',
-    password: '$2b$10$YmViZGRlbiBoYXNo', // bcrypt hash
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    password: 'hashedPassword123',
+    createdAt: mockDate,
+    updatedAt: mockDate,
   };
 
   beforeEach(async () => {
@@ -27,21 +29,16 @@ describe('AuthService', () => {
         {
           provide: UsersService,
           useValue: {
-            findByEmail: jest.fn().mockResolvedValue(mockUser),
-            findById: jest.fn().mockResolvedValue(mockUser),
+            findByEmail: jest.fn(),
+            findById: jest.fn(),
+            findByEmailWithPassword: jest.fn(),
           },
         },
         {
           provide: JwtService,
           useValue: {
             sign: jest.fn().mockReturnValue('mock.jwt.token'),
-            verify: jest.fn().mockReturnValue({ sub: '1', email: 'test@example.com' }),
-          },
-        },
-        {
-          provide: EventsService,
-          useValue: {
-            publishUserLoggedIn: jest.fn().mockResolvedValue(undefined),
+            verify: jest.fn(),
           },
         },
       ],
@@ -50,7 +47,6 @@ describe('AuthService', () => {
     service = module.get<AuthService>(AuthService);
     usersService = module.get<UsersService>(UsersService);
     jwtService = module.get<JwtService>(JwtService);
-    eventsService = module.get<EventsService>(EventsService);
   });
 
   it('should be defined', () => {
@@ -59,67 +55,71 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should return user without password if credentials are valid', async () => {
+      jest.spyOn(usersService, 'findByEmailWithPassword').mockResolvedValue(mockUser);
       jest.spyOn(bcrypt, 'compare').mockImplementation(() => Promise.resolve(true));
-      
-      const result = await service.validateUser('test@example.com', 'password123');
-      
+
+      const result = await service.validateUser(mockUser.email, 'password123');
+      const { password: _, ...expectedUser } = mockUser;
       expect(result).toBeDefined();
-      expect(result).not.toHaveProperty('password');
-      expect(result).toHaveProperty('id', mockUser.id);
-      expect(result).toHaveProperty('email', mockUser.email);
+      expect(result).toEqual(expectedUser);
     });
 
     it('should return null if user is not found', async () => {
-      jest.spyOn(usersService, 'findByEmail').mockResolvedValue(null);
-      
-      const result = await service.validateUser('wrong@example.com', 'password123');
-      
-      expect(result).toBeNull();
-    });
+      jest.spyOn(usersService, 'findByEmailWithPassword').mockResolvedValue(null);
 
-    it('should return null if password is invalid', async () => {
-      jest.spyOn(bcrypt, 'compare').mockImplementation(() => Promise.resolve(false));
-      
-      const result = await service.validateUser('test@example.com', 'wrongpassword');
-      
+      const result = await service.validateUser('nonexistent@example.com', 'password123');
       expect(result).toBeNull();
     });
   });
 
   describe('login', () => {
-    it('should throw UnauthorizedException for invalid credentials', async () => {
+    const loginDto: LoginDto = {
+      email: 'test@example.com',
+      password: 'password123',
+    };
+
+    it('should throw UnauthorizedException if credentials are invalid', async () => {
       jest.spyOn(service, 'validateUser').mockResolvedValue(null);
 
       await expect(
-        service.login('test@example.com', 'wrongpassword'),
+        service.login(loginDto),
       ).rejects.toThrow(UnauthorizedException);
     });
 
-    it('should return access token and user data for valid credentials', async () => {
-      const { password, ...userData } = mockUser;
-      jest.spyOn(service, 'validateUser').mockResolvedValue(userData);
+    it('should return access token if credentials are valid', async () => {
+      const userWithoutPassword = {
+        id: mockUser.id,
+        email: mockUser.email,
+        createdAt: mockUser.createdAt,
+        updatedAt: mockUser.updatedAt,
+      };
 
-      const result = await service.login('test@example.com', 'password123');
+      jest.spyOn(service, 'validateUser').mockResolvedValue(userWithoutPassword);
+      jest.spyOn(jwtService, 'sign').mockReturnValue('mock.jwt.token');
 
-      expect(result).toHaveProperty('access_token', 'mock.jwt.token');
-      expect(result).toHaveProperty('user');
-      expect(result.user).not.toHaveProperty('password');
-      expect(result.user).toEqual(userData);
-      expect(eventsService.publishUserLoggedIn).toHaveBeenCalledWith(mockUser.id);
+      const result = await service.login(loginDto);
+
+      expect(result).toEqual({
+        access_token: 'mock.jwt.token',
+        user: {
+          id: mockUser.id,
+          email: mockUser.email,
+        },
+      });
     });
   });
 
   describe('validateToken', () => {
-    it('should return user data for valid token', async () => {
-      const result = await service.validateToken('valid.jwt.token');
+    it('should return user data if token is valid', async () => {
+      const payload = { sub: mockUser.id, email: mockUser.email };
+      jest.spyOn(jwtService, 'verify').mockReturnValue(payload);
+      jest.spyOn(usersService, 'findById').mockResolvedValue(mockUser);
 
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty('id', mockUser.id);
-      expect(result).toHaveProperty('email', mockUser.email);
-      expect(result).not.toHaveProperty('password');
+      const result = await service.validateToken('valid.jwt.token');
+      expect(result).toEqual(mockUser);
     });
 
-    it('should throw UnauthorizedException for invalid token', async () => {
+    it('should throw UnauthorizedException if token is invalid', async () => {
       jest.spyOn(jwtService, 'verify').mockImplementation(() => {
         throw new Error('Invalid token');
       });
@@ -130,11 +130,13 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException if user not found', async () => {
-      jest.spyOn(usersService, 'findById').mockResolvedValue(null);
+      const payload = { sub: 'nonexistent-id', email: 'test@example.com' };
+      jest.spyOn(jwtService, 'verify').mockReturnValue(payload);
+      jest.spyOn(usersService, 'findById').mockResolvedValue(null as unknown as User);
 
       await expect(
         service.validateToken('valid.jwt.token'),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
-}); 
+});

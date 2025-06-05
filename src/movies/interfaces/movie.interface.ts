@@ -20,4 +20,14 @@ export interface MovieDetails extends Movie {
   status: string;
   tagline: string;
   backdrop_path: string;
+}
+
+export interface TMDbError {
+  response?: {
+    status: number;
+    data?: {
+      status_message: string;
+      status_code: number;
+    };
+  };
 } 

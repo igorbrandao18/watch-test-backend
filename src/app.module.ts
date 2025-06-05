@@ -5,6 +5,7 @@ import { UsersModule } from './users/users.module';
 import { MoviesModule } from './movies/movies.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import * as redisStore from 'cache-manager-redis-store';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -21,5 +22,6 @@ import * as redisStore from 'cache-manager-redis-store';
     UsersModule,
     MoviesModule,
   ],
+  controllers: [AppController],
 })
 export class AppModule {} 

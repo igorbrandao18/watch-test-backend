@@ -4,6 +4,7 @@ import { MoviesService } from './movies.service';
 import { MoviesController } from './movies.controller';
 import { ConfigModule } from '@nestjs/config';
 import { EventsModule } from '../events/events.module';
+import { PrismaService } from '../common/prisma.service';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { EventsModule } from '../events/events.module';
     ConfigModule,
     EventsModule,
   ],
-  providers: [MoviesService],
+  providers: [MoviesService, PrismaService],
   controllers: [MoviesController],
 })
 export class MoviesModule {} 

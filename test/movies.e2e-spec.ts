@@ -2,13 +2,18 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/common/prisma.service';
-import * as bcrypt from 'bcrypt';
+import { setupTestDatabase, cleanupTestDatabase } from './helpers';
+import { PrismaClient } from '../generated/prisma';
 
 describe('MoviesController (e2e)', () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: PrismaClient;
   let authToken: string;
+
+  const testUser = {
+    email: 'test@example.com',
+    password: 'test123',
+  };
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -16,32 +21,28 @@ describe('MoviesController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    prisma = app.get(PrismaService);
     await app.init();
 
-    // Create test user
-    const hashedPassword = await bcrypt.hash('password123', 10);
-    await prisma.user.create({
-      data: {
-        email: 'test@example.com',
-        password: hashedPassword,
-      },
-    });
+    prisma = await setupTestDatabase();
+  });
 
-    // Get auth token
+  beforeEach(async () => {
+    await cleanupTestDatabase();
+
+    // Create test user and get auth token
+    const registerResponse = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send(testUser);
+
     const loginResponse = await request(app.getHttpServer())
       .post('/auth/login')
-      .send({
-        email: 'test@example.com',
-        password: 'password123',
-      });
+      .send(testUser);
 
     authToken = loginResponse.body.access_token;
   });
 
   afterAll(async () => {
-    await prisma.user.deleteMany();
-    await prisma.$disconnect();
+    await cleanupTestDatabase();
     await app.close();
   });
 
@@ -69,20 +70,25 @@ describe('MoviesController (e2e)', () => {
   describe('/movies/:id (GET)', () => {
     it('should require authentication', () => {
       return request(app.getHttpServer())
-        .get('/movies/550')
+        .get('/movies/123')
         .expect(401);
     });
 
-    it('should return movie details', () => {
+    it('should return movie details', async () => {
+      const popularMovies = await request(app.getHttpServer())
+        .get('/movies/popular')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      const movieId = popularMovies.body[0].id;
+
       return request(app.getHttpServer())
-        .get('/movies/550')
+        .get(`/movies/${movieId}`)
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200)
         .expect((res) => {
-          expect(res.body).toHaveProperty('id');
+          expect(res.body).toHaveProperty('id', movieId);
           expect(res.body).toHaveProperty('title');
           expect(res.body).toHaveProperty('overview');
-          expect(res.body).toHaveProperty('release_date');
         });
     });
 

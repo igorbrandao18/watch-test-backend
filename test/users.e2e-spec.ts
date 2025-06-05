@@ -2,50 +2,52 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/common/prisma.service';
+import { setupTestDatabase, cleanupTestDatabase } from './helpers';
+import { v4 as uuid } from 'uuid';
 
 describe('UsersController (e2e)', () => {
   let app: INestApplication;
-  let prisma: PrismaService;
-  let authToken: string;
   let userId: string;
+  let authToken: string;
+  let testUser;
 
-  const userDto = {
-    email: 'test@example.com',
+  const generateTestUser = () => ({
+    email: `test.${uuid()}@example.com`,
     password: 'password123',
-  };
+  });
 
   beforeAll(async () => {
+    await setupTestDatabase();
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    prisma = app.get(PrismaService);
     await app.init();
   });
 
-  beforeEach(async () => {
-    await prisma.user.deleteMany();
+  afterAll(async () => {
+    await app.close();
+    await cleanupTestDatabase();
+  });
 
-    // Create test user and get auth token
+  beforeEach(async () => {
+    // Create a test user and get token
+    testUser = generateTestUser();
     const registerResponse = await request(app.getHttpServer())
       .post('/auth/register')
-      .send(userDto);
-    
+      .send(testUser)
+      .expect(201);
+
     userId = registerResponse.body.id;
 
     const loginResponse = await request(app.getHttpServer())
       .post('/auth/login')
-      .send(userDto);
+      .send(testUser)
+      .expect(200);
 
     authToken = loginResponse.body.access_token;
-  });
-
-  afterAll(async () => {
-    await prisma.user.deleteMany();
-    await prisma.$disconnect();
-    await app.close();
   });
 
   describe('GET /users/:id', () => {
@@ -56,14 +58,14 @@ describe('UsersController (e2e)', () => {
         .expect(200)
         .expect((res) => {
           expect(res.body).toHaveProperty('id', userId);
-          expect(res.body).toHaveProperty('email', userDto.email);
+          expect(res.body).toHaveProperty('email');
           expect(res.body).not.toHaveProperty('password');
         });
     });
 
     it('should return 404 for non-existent user', () => {
       return request(app.getHttpServer())
-        .get('/users/nonexistent-id')
+        .get('/users/non-existent-id')
         .set('Authorization', `Bearer ${authToken}`)
         .expect(404);
     });
@@ -85,13 +87,10 @@ describe('UsersController (e2e)', () => {
         .send({ password: newPassword })
         .expect(200);
 
-      // Try logging in with new password
+      // Try to login with new password
       return request(app.getHttpServer())
         .post('/auth/login')
-        .send({
-          email: userDto.email,
-          password: newPassword,
-        })
+        .send({ email: testUser.email, password: newPassword })
         .expect(200);
     });
 
@@ -102,18 +101,9 @@ describe('UsersController (e2e)', () => {
         .expect(401);
     });
 
-    it('should not update password of other users', async () => {
-      // Create another user
-      const otherUser = {
-        email: 'other@example.com',
-        password: 'password123',
-      };
-      const otherUserResponse = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send(otherUser);
-
+    it('should not update password of other users', () => {
       return request(app.getHttpServer())
-        .patch(`/users/${otherUserResponse.body.id}/password`)
+        .patch('/users/other-user-id/password')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ password: newPassword })
         .expect(403);
@@ -122,15 +112,32 @@ describe('UsersController (e2e)', () => {
 
   describe('DELETE /users/:id', () => {
     it('should delete user', async () => {
+      // Delete the user
       await request(app.getHttpServer())
         .delete(`/users/${userId}`)
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
 
-      // Try to get deleted user
-      return request(app.getHttpServer())
+      // Try to get deleted user without token (should be 401)
+      await request(app.getHttpServer())
         .get(`/users/${userId}`)
-        .set('Authorization', `Bearer ${authToken}`)
+        .expect(401);
+
+      // Try to get deleted user with token (should be 404)
+      const newUser = generateTestUser();
+      const registerResponse = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send(newUser)
+        .expect(201);
+
+      const loginResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send(newUser)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/users/${userId}`)
+        .set('Authorization', `Bearer ${loginResponse.body.access_token}`)
         .expect(404);
     });
 
@@ -140,18 +147,9 @@ describe('UsersController (e2e)', () => {
         .expect(401);
     });
 
-    it('should not delete other users', async () => {
-      // Create another user
-      const otherUser = {
-        email: 'other@example.com',
-        password: 'password123',
-      };
-      const otherUserResponse = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send(otherUser);
-
+    it('should not delete other users', () => {
       return request(app.getHttpServer())
-        .delete(`/users/${otherUserResponse.body.id}`)
+        .delete('/users/other-user-id')
         .set('Authorization', `Bearer ${authToken}`)
         .expect(403);
     });

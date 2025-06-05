@@ -4,8 +4,15 @@ import { PrismaClient } from '../../generated/prisma';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+
     super({
-      log: ['query', 'info', 'warn', 'error'],
+      datasources: {
+        db: { url },
+      },
     });
   }
 
