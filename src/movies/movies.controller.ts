@@ -2,10 +2,11 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   UseGuards,
-  Req,
   ParseIntPipe,
   NotFoundException,
+  Request,
 } from '@nestjs/common';
 import { MoviesService } from './movies.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,8 +16,8 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
-import { RequestWithUser } from './interfaces/request.interface';
 import { Movie, MovieDetails } from './interfaces/movie.interface';
 
 @ApiTags('movies')
@@ -32,47 +33,16 @@ export class MoviesController {
     description:
       'Retorna uma lista dos filmes mais populares do momento usando dados do TMDb.',
   })
+  @ApiQuery({
+    name: 'language',
+    required: false,
+    type: String,
+    description: 'Código do idioma (ex: pt-BR, en-US)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de filmes populares retornada com sucesso',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: {
-            type: 'number',
-            example: 550,
-            description: 'ID do filme no TMDb',
-          },
-          title: {
-            type: 'string',
-            example: 'Fight Club',
-            description: 'Título do filme',
-          },
-          overview: {
-            type: 'string',
-            example: 'Um homem deprimido...',
-            description: 'Sinopse do filme',
-          },
-          poster_path: {
-            type: 'string',
-            example: '/poster.jpg',
-            description: 'Caminho do poster',
-          },
-          release_date: {
-            type: 'string',
-            example: '1999-10-15',
-            description: 'Data de lançamento',
-          },
-          vote_average: {
-            type: 'number',
-            example: 8.4,
-            description: 'Nota média',
-          },
-        },
-      },
-    },
+    type: [Movie],
   })
   @ApiResponse({
     status: 401,
@@ -82,8 +52,77 @@ export class MoviesController {
     status: 500,
     description: 'Erro interno do servidor ou falha na API do TMDb',
   })
-  async getPopularMovies(): Promise<Movie[]> {
-    return this.moviesService.getPopularMovies();
+  async getPopularMovies(
+    @Query('language') language?: string,
+  ): Promise<Movie[]> {
+    return this.moviesService.getPopularMovies(language);
+  }
+
+  @Get('now-playing')
+  @ApiOperation({
+    summary: 'Get movies now playing',
+    description: 'Retorna uma lista dos filmes em cartaz nos cinemas.',
+  })
+  @ApiQuery({
+    name: 'language',
+    required: false,
+    type: String,
+    description: 'Código do idioma (ex: pt-BR, en-US)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de filmes em cartaz retornada com sucesso',
+    type: [Movie],
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Não autorizado - Token JWT inválido ou ausente',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Erro interno do servidor ou falha na API do TMDb',
+  })
+  async getNowPlaying(
+    @Query('language') language?: string,
+  ): Promise<Movie[]> {
+    return this.moviesService.getNowPlaying(language);
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Search movies',
+    description: 'Busca filmes pelo título ou palavras-chave.',
+  })
+  @ApiQuery({
+    name: 'query',
+    required: true,
+    type: String,
+    description: 'Termo de busca',
+  })
+  @ApiQuery({
+    name: 'language',
+    required: false,
+    type: String,
+    description: 'Código do idioma (ex: pt-BR, en-US)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de filmes encontrados',
+    type: [Movie],
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Não autorizado - Token JWT inválido ou ausente',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Erro interno do servidor ou falha na API do TMDb',
+  })
+  async searchMovies(
+    @Query('query') query: string,
+    @Query('language') language?: string,
+  ): Promise<Movie[]> {
+    return this.moviesService.searchMovies(query, language);
   }
 
   @Get(':id')
@@ -95,54 +134,37 @@ export class MoviesController {
   @ApiParam({
     name: 'id',
     description: 'ID do filme no TMDb',
-    example: '550',
+    type: Number,
     required: true,
+  })
+  @ApiQuery({
+    name: 'language',
+    required: false,
+    type: String,
+    description: 'Código do idioma (ex: pt-BR, en-US)',
   })
   @ApiResponse({
     status: 200,
     description: 'Detalhes do filme retornados com sucesso',
-    schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', example: 550 },
-        title: { type: 'string', example: 'Fight Club' },
-        overview: { type: 'string', example: 'Um homem deprimido...' },
-        poster_path: { type: 'string', example: '/poster.jpg' },
-        release_date: { type: 'string', example: '1999-10-15' },
-        vote_average: { type: 'number', example: 8.4 },
-        genres: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'number', example: 18 },
-              name: { type: 'string', example: 'Drama' },
-            },
-          },
-        },
-        runtime: { type: 'number', example: 139 },
-        budget: { type: 'number', example: 63000000 },
-        revenue: { type: 'number', example: 101200000 },
-      },
-    },
+    type: MovieDetails,
   })
   @ApiResponse({
     status: 401,
     description: 'Não autorizado - Token JWT inválido ou ausente',
   })
-  @ApiResponse({ status: 404, description: 'Filme não encontrado' })
+  @ApiResponse({
+    status: 404,
+    description: 'Filme não encontrado',
+  })
   @ApiResponse({
     status: 500,
     description: 'Erro interno do servidor ou falha na API do TMDb',
   })
   async getMovieDetails(
     @Param('id', ParseIntPipe) id: number,
-    @Req() req: any,
+    @Query('language') language?: string,
+    @Request() req?: any,
   ): Promise<MovieDetails> {
-    const movie = await this.moviesService.getMovieDetails(id);
-    if (!movie) {
-      throw new NotFoundException('Movie not found');
-    }
-    return movie;
+    return this.moviesService.getMovieDetails(id, language, req.user?.id);
   }
 } 

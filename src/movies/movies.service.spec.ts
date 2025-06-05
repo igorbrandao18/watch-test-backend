@@ -4,10 +4,11 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { EventsService } from '../events/events.service';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { NotFoundException } from '@nestjs/common';
 import { AxiosResponse, InternalAxiosRequestConfig, AxiosHeaders } from 'axios';
 import { PrismaService } from '../common/prisma.service';
+import { TMDbRateLimitError, TMDbInvalidApiKeyError } from './interfaces/tmdb-error.interface';
 
 describe('MoviesService', () => {
   let service: MoviesService;
@@ -15,6 +16,7 @@ describe('MoviesService', () => {
   let cacheManager: any;
   let eventsService: EventsService;
   let prisma: PrismaService;
+  let configService: ConfigService;
 
   const mockConfigService = {
     get: jest.fn((key: string) => {
@@ -95,6 +97,38 @@ describe('MoviesService', () => {
     },
   };
 
+  const mockMovie = {
+    id: 550,
+    title: 'Fight Club',
+    overview: 'Test overview',
+    poster_path: '/poster.jpg',
+    backdrop_path: '/backdrop.jpg',
+    release_date: '1999-10-15',
+    vote_average: 8.4,
+  };
+
+  const mockMovieWithFullPaths = {
+    ...mockMovie,
+    poster_path: 'https://image.tmdb.org/t/p/w500/poster.jpg',
+    backdrop_path: 'https://image.tmdb.org/t/p/w500/backdrop.jpg',
+  };
+
+  const mockMovieDetails = {
+    ...mockMovie,
+    genres: [{ id: 18, name: 'Drama' }],
+    runtime: 139,
+    tagline: 'Test tagline',
+    status: 'Released',
+    budget: 63000000,
+    revenue: 101200000,
+  };
+
+  const mockMovieDetailsWithFullPaths = {
+    ...mockMovieDetails,
+    poster_path: 'https://image.tmdb.org/t/p/w500/poster.jpg',
+    backdrop_path: 'https://image.tmdb.org/t/p/w500/backdrop.jpg',
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -107,7 +141,15 @@ describe('MoviesService', () => {
         },
         {
           provide: ConfigService,
-          useValue: mockConfigService,
+          useValue: {
+            get: jest.fn().mockImplementation((key: string) => {
+              const config = {
+                TMDB_API_URL: 'https://api.tmdb.org/3',
+                TMDB_API_KEY: 'test-key',
+              };
+              return config[key];
+            }),
+          },
         },
         {
           provide: CACHE_MANAGER,
@@ -145,6 +187,7 @@ describe('MoviesService', () => {
     cacheManager = module.get(CACHE_MANAGER);
     eventsService = module.get<EventsService>(EventsService);
     prisma = module.get<PrismaService>(PrismaService);
+    configService = module.get<ConfigService>(ConfigService);
   });
 
   it('should be defined', () => {
@@ -154,66 +197,138 @@ describe('MoviesService', () => {
   describe('getPopularMovies', () => {
     const cacheKey = 'popular_movies';
 
-    it('should return cached popular movies if available', async () => {
-      const cachedMovies = [mockMovieResponse.data];
-      jest.spyOn(cacheManager, 'get').mockResolvedValue(cachedMovies);
+    it('should return cached movies if available', async () => {
+      const cachedMovies = [mockMovie];
+      cacheManager.get.mockResolvedValue(cachedMovies);
 
       const result = await service.getPopularMovies();
-      expect(result).toEqual(cachedMovies);
+
+      expect(result).toEqual([mockMovieWithFullPaths]);
       expect(httpService.get).not.toHaveBeenCalled();
     });
 
-    it('should fetch and cache popular movies if not cached', async () => {
-      jest.spyOn(cacheManager, 'get').mockResolvedValue(null);
-      jest.spyOn(httpService, 'get').mockReturnValue(of(mockPopularMoviesResponse));
+    it('should fetch movies from TMDb if not cached', async () => {
+      cacheManager.get.mockResolvedValue(null);
+      jest.spyOn(httpService, 'get').mockReturnValue(
+        of({
+          data: { results: [mockMovie] },
+        } as any),
+      );
 
       const result = await service.getPopularMovies();
-      expect(result).toEqual(mockPopularMoviesResponse.data.results);
+
+      expect(result).toEqual([mockMovieWithFullPaths]);
       expect(cacheManager.set).toHaveBeenCalled();
+    });
+
+    it('should handle different languages', async () => {
+      const language = 'en-US';
+      cacheManager.get.mockResolvedValue(null);
+      jest.spyOn(httpService, 'get').mockReturnValue(
+        of({
+          data: { results: [mockMovie] },
+        } as any),
+      );
+
+      await service.getPopularMovies(language);
+
+      expect(httpService.get).toHaveBeenCalledWith(
+        expect.stringContaining(`language=${language}`),
+      );
     });
   });
 
-  describe('getMovieById', () => {
-    const movieId = '1';
-    const cacheKey = `movie_${movieId}`;
-    const userId = 'user-1';
+  describe('getMovieDetails', () => {
+    it('should return cached movie details if available', async () => {
+      cacheManager.get.mockResolvedValue(mockMovieDetails);
 
-    it('should return cached movie if available', async () => {
-      const cachedMovie = mockMovieResponse.data;
-      jest.spyOn(cacheManager, 'get').mockResolvedValue(cachedMovie);
+      const result = await service.getMovieDetails(550);
 
-      const result = await service.getMovieById(movieId, userId);
-      expect(result).toEqual(cachedMovie);
+      expect(result).toEqual(mockMovieDetailsWithFullPaths);
       expect(httpService.get).not.toHaveBeenCalled();
-      expect(eventsService.publishMovieViewed).toHaveBeenCalledWith(userId, movieId);
-    });
-
-    it('should fetch and cache movie if not cached', async () => {
-      jest.spyOn(cacheManager, 'get').mockResolvedValue(null);
-      jest.spyOn(httpService, 'get').mockReturnValue(of(mockMovieResponse));
-
-      const result = await service.getMovieById(movieId, userId);
-      expect(result).toEqual(mockMovieResponse.data);
-      expect(cacheManager.set).toHaveBeenCalled();
-      expect(eventsService.publishMovieViewed).toHaveBeenCalledWith(userId, movieId);
     });
 
     it('should throw NotFoundException for non-existent movie', async () => {
-      jest.spyOn(cacheManager, 'get').mockResolvedValue(null);
-      jest.spyOn(httpService, 'get').mockImplementation(() => {
-        throw {
+      cacheManager.get.mockResolvedValue(null);
+      jest.spyOn(httpService, 'get').mockReturnValue(
+        throwError(() => ({
+          response: { status: 404 },
+        })),
+      );
+
+      await expect(service.getMovieDetails(999999)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('error handling', () => {
+    it('should throw TMDbRateLimitError on rate limit exceeded', async () => {
+      cacheManager.get.mockResolvedValue(null);
+      jest.spyOn(httpService, 'get').mockReturnValue(
+        throwError(() => ({
           response: {
-            status: 404,
+            status: 429,
             data: {
-              success: false,
-              status_code: 34,
-              status_message: 'The resource you requested could not be found.',
+              status_message: 'Rate limit exceeded',
+              status_code: 429,
             },
           },
-        };
-      });
+        })),
+      );
 
-      await expect(service.getMovieById(movieId, userId)).rejects.toThrow(NotFoundException);
+      await expect(service.getPopularMovies()).rejects.toThrow(TMDbRateLimitError);
+    });
+
+    it('should throw TMDbInvalidApiKeyError on invalid API key', async () => {
+      cacheManager.get.mockResolvedValue(null);
+      jest.spyOn(httpService, 'get').mockReturnValue(
+        throwError(() => ({
+          response: {
+            status: 401,
+            data: {
+              status_message: 'Invalid API key',
+              status_code: 401,
+            },
+          },
+        })),
+      );
+
+      await expect(service.getPopularMovies()).rejects.toThrow(
+        TMDbInvalidApiKeyError,
+      );
+    });
+  });
+
+  describe('searchMovies', () => {
+    it('should return cached search results if available', async () => {
+      const cachedMovies = [mockMovie];
+      cacheManager.get.mockResolvedValue(cachedMovies);
+
+      const result = await service.searchMovies('fight club');
+
+      expect(result).toEqual([mockMovieWithFullPaths]);
+      expect(httpService.get).not.toHaveBeenCalled();
+    });
+
+    it('should search movies with different languages', async () => {
+      const query = 'clube da luta';
+      const language = 'pt-BR';
+      cacheManager.get.mockResolvedValue(null);
+      jest.spyOn(httpService, 'get').mockReturnValue(
+        of({
+          data: { results: [mockMovie] },
+        } as any),
+      );
+
+      await service.searchMovies(query, language);
+
+      expect(httpService.get).toHaveBeenCalledWith(
+        expect.stringContaining(`language=${language}`),
+      );
+      expect(httpService.get).toHaveBeenCalledWith(
+        expect.stringContaining(`query=${encodeURIComponent(query)}`),
+      );
     });
   });
 }); 

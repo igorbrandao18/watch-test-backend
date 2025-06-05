@@ -8,11 +8,15 @@ graph TD
     API --> Auth[Módulo Auth]
     API --> Movies[Módulo Movies]
     API --> Health[Módulo Health]
+    API --> Events[Módulo Events]
     
     Auth --> JWT[JWT Service]
     Auth --> Users[Users Service]
     Movies --> TMDb[TMDb API]
     Movies --> Cache[Redis Cache]
+    Movies --> Events
+    
+    Events --> Kafka[Apache Kafka]
     
     subgraph Database
         PostgreSQL[(PostgreSQL)]
@@ -22,6 +26,7 @@ graph TD
         Logs[Logs Estruturados]
         Traces[OpenTelemetry]
         Metrics[Métricas]
+        Kafka --> Analytics[Analytics]
     end
     
     Users --> PostgreSQL
@@ -51,6 +56,13 @@ graph TD
 - Cache de resultados
 - Tracking de visualizações
 - Gerenciamento de estado
+- Publicação de eventos
+
+#### Events Module
+- Integração com Kafka
+- Publicação de eventos
+- Processamento assíncrono
+- Rastreamento de ações
 
 #### Health Module
 - Healthcheck dos serviços
@@ -64,6 +76,12 @@ graph TD
 - Cache de detalhes de filmes
 - TTL configurável
 - Invalidação automática
+
+#### Message Broker (Kafka)
+- Tópicos de eventos
+- Processamento assíncrono
+- Rastreamento de ações
+- Analytics em tempo real
 
 #### Database (PostgreSQL)
 - Persistência de dados
@@ -100,19 +118,39 @@ sequenceDiagram
     API-->>-Client: JWT Token
 ```
 
-### 2. Busca de Filmes
+### 2. Visualização de Filme
 ```mermaid
 sequenceDiagram
-    Client->>+API: GET /movies/popular
+    Client->>+API: GET /movies/{id}
     API->>+Cache: Check Cache
     alt Cache Hit
         Cache-->>API: Cached Data
     else Cache Miss
-        API->>+TMDb: Fetch Movies
-        TMDb-->>-API: Movies Data
+        API->>+TMDb: Fetch Movie
+        TMDb-->>-API: Movie Data
         API->>Cache: Store in Cache
     end
-    API-->>-Client: Movies List
+    API->>+Events: Publish MovieViewed
+    Events->>Kafka: Emit Event
+    API-->>-Client: Movie Details
+```
+
+### 3. Processamento de Eventos
+```mermaid
+sequenceDiagram
+    participant API
+    participant Events
+    participant Kafka
+    participant Analytics
+    
+    API->>+Events: Publish Event
+    Events->>+Kafka: Emit Event
+    Kafka-->>-Events: Ack
+    Events-->>-API: Success
+    
+    Kafka->>+Analytics: Process Event
+    Analytics->>Analytics: Update Metrics
+    Analytics-->>-Kafka: Processed
 ```
 
 ## Considerações de Segurança
@@ -132,14 +170,21 @@ sequenceDiagram
    - Invalidação manual
    - Chaves únicas
 
+4. **Eventos**
+   - Validação de payload
+   - Retry policies
+   - Dead letter queues
+
 ## Escalabilidade
 
 1. **Horizontal**
    - Stateless design
    - Cache distribuído
    - Load balancing
+   - Kafka partitioning
 
 2. **Vertical**
    - Query optimization
    - Connection pooling
-   - Resource limits 
+   - Resource limits
+   - Batch processing 

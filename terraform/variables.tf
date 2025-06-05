@@ -5,39 +5,56 @@ variable "project_name" {
 }
 
 variable "aws_region" {
-  description = "Região AWS para deploy"
+  description = "AWS region"
   type        = string
   default     = "us-east-1"
 }
 
 variable "db_username" {
-  description = "Username do banco de dados"
+  description = "Database username"
   type        = string
   sensitive   = true
 }
 
 variable "db_password" {
-  description = "Senha do banco de dados"
+  description = "Database password"
   type        = string
   sensitive   = true
 }
 
 variable "environment" {
-  description = "Ambiente (dev, staging, prod)"
+  description = "Environment name"
   type        = string
-  default     = "dev"
+  default     = "production"
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for VPC"
+  type        = string
+  default     = "10.0.0.0/16"
 }
 
 variable "app_port" {
-  description = "Porta da aplicação"
+  description = "Port exposed by the application"
   type        = number
   default     = 3000
 }
 
-variable "desired_count" {
-  description = "Número desejado de instâncias da aplicação"
+variable "app_count" {
+  description = "Number of application instances"
   type        = number
   default     = 2
+}
+
+variable "app_image" {
+  description = "Docker image for the application"
+  type        = string
+}
+
+variable "db_name" {
+  description = "Database name"
+  type        = string
+  default     = "watchme"
 }
 
 variable "container_cpu" {
@@ -50,4 +67,10 @@ variable "container_memory" {
   description = "Memória para cada container (em MB)"
   type        = number
   default     = 512
+}
+
+variable "kafka_version" {
+  description = "MSK Kafka version"
+  type        = string
+  default     = "2.8.1"
 } 

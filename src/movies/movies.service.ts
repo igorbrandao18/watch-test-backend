@@ -8,9 +8,15 @@ import { EventsService } from '../events/events.service';
 import {
   Movie,
   MovieDetails,
-  TMDbError
 } from './interfaces/movie.interface';
+import { 
+  TMDbError, 
+  TMDbApiError, 
+  TMDbRateLimitError, 
+  TMDbInvalidApiKeyError 
+} from './interfaces/tmdb-error.interface';
 import { PrismaService } from '../common/prisma.service';
+import { map, catchError } from 'rxjs/operators';
 
 @Injectable()
 export class MoviesService {
@@ -37,95 +43,153 @@ export class MoviesService {
     this.apiKey = apiKey;
   }
 
-  async getPopularMovies(): Promise<Movie[]> {
-    const cacheKey = 'popular_movies';
+  private getCacheKey(key: string, language: string = 'pt-BR'): string {
+    return `${key}_${language}`;
+  }
+
+  private addImageUrls<T extends { poster_path?: string | null; backdrop_path?: string | null }>(
+    item: T
+  ): T {
+    return {
+      ...item,
+      poster_path: item.poster_path ? `${this.imageBaseUrl}${item.poster_path}` : null,
+      backdrop_path: item.backdrop_path ? `${this.imageBaseUrl}${item.backdrop_path}` : null,
+    };
+  }
+
+  async getPopularMovies(language: string = 'pt-BR'): Promise<Movie[]> {
+    const cacheKey = this.getCacheKey('popular_movies', language);
     const cachedData = await this.cacheManager.get<Movie[]>(cacheKey);
 
     if (cachedData) {
-      return cachedData.map(movie => ({
-        ...movie,
-        poster_path: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : null,
-        backdrop_path: movie.backdrop_path ? `${this.imageBaseUrl}${movie.backdrop_path}` : null
-      }));
+      return cachedData.map(movie => this.addImageUrls(movie));
     }
 
-    const url = `${this.apiUrl}/movie/popular?api_key=${this.apiKey}&language=pt-BR`;
-    const { data } = await firstValueFrom(this.httpService.get<{ results: Movie[] }>(url));
+    try {
+      const url = `${this.apiUrl}/movie/popular?api_key=${this.apiKey}&language=${language}`;
+      const { data } = await firstValueFrom(this.httpService.get<{ results: Movie[] }>(url));
 
-    const moviesWithFullPaths = data.results.map(movie => ({
-      ...movie,
-      poster_path: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : null,
-      backdrop_path: movie.backdrop_path ? `${this.imageBaseUrl}${movie.backdrop_path}` : null
-    }));
-
-    await this.cacheManager.set(cacheKey, moviesWithFullPaths, this.CACHE_TTL);
-    return moviesWithFullPaths;
+      const moviesWithFullPaths = data.results.map(movie => this.addImageUrls(movie));
+      await this.cacheManager.set(cacheKey, moviesWithFullPaths, this.CACHE_TTL);
+      
+      return moviesWithFullPaths;
+    } catch (error: unknown) {
+      this.handleTMDbError(error);
+    }
   }
 
-  async getMovieDetails(id: number): Promise<MovieDetails> {
-    const cacheKey = `movie_${id}`;
-    const cachedData = await this.cacheManager.get<MovieDetails>(cacheKey);
+  async getMovieDetails(id: number, language: string = 'pt-BR', userId?: number): Promise<MovieDetails> {
+    const cacheKey = `movie_details_${id}_${language}`;
+    const cached = await this.cacheManager.get<MovieDetails>(cacheKey);
+
+    if (cached) {
+      if (userId) {
+        await this.eventsService.publishMovieViewed({
+          userId,
+          movieId: id,
+          timestamp: new Date(),
+          language,
+        });
+      }
+      return this.addImageUrls(cached);
+    }
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService
+          .get<MovieDetails>(`${this.apiUrl}/movie/${id}`, {
+            params: {
+              api_key: this.apiKey,
+              language,
+            },
+          })
+          .pipe(
+            map((response) => response.data),
+            catchError((error) => {
+              if (error.response?.status === 404) {
+                throw new NotFoundException(`Movie with ID ${id} not found`);
+              }
+              throw this.handleTMDbError(error);
+            }),
+          ),
+      );
+
+      await this.cacheManager.set(cacheKey, response, this.CACHE_TTL);
+
+      if (userId) {
+        await this.eventsService.publishMovieViewed({
+          userId,
+          movieId: id,
+          timestamp: new Date(),
+          language,
+        });
+      }
+
+      return this.addImageUrls(response);
+    } catch (error) {
+      throw this.handleTMDbError(error);
+    }
+  }
+
+  async searchMovies(query: string, language: string = 'pt-BR'): Promise<Movie[]> {
+    const cacheKey = this.getCacheKey(`search_${query}`, language);
+    const cachedData = await this.cacheManager.get<Movie[]>(cacheKey);
 
     if (cachedData) {
-      return {
-        ...cachedData,
-        poster_path: cachedData.poster_path ? `${this.imageBaseUrl}${cachedData.poster_path}` : null,
-        backdrop_path: cachedData.backdrop_path ? `${this.imageBaseUrl}${cachedData.backdrop_path}` : null
-      };
+      return cachedData.map(movie => this.addImageUrls(movie));
     }
 
-    const url = `${this.apiUrl}/movie/${id}?api_key=${this.apiKey}&language=pt-BR`;
-    
     try {
-      const response = await firstValueFrom(
-        this.httpService.get<MovieDetails>(url),
-      );
-      const movie = {
-        ...response.data,
-        poster_path: response.data.poster_path ? `${this.imageBaseUrl}${response.data.poster_path}` : null,
-        backdrop_path: response.data.backdrop_path ? `${this.imageBaseUrl}${response.data.backdrop_path}` : null
-      };
-      
-      if (!movie) {
-        throw new NotFoundException('Movie not found');
-      }
+      const url = `${this.apiUrl}/search/movie?api_key=${this.apiKey}&language=${language}&query=${encodeURIComponent(query)}`;
+      const { data } = await firstValueFrom(this.httpService.get<{ results: Movie[] }>(url));
 
-      await this.cacheManager.set(cacheKey, movie, this.CACHE_TTL);
-      return movie;
+      const moviesWithFullPaths = data.results.map(movie => this.addImageUrls(movie));
+      await this.cacheManager.set(cacheKey, moviesWithFullPaths, this.CACHE_TTL);
+      
+      return moviesWithFullPaths;
     } catch (error: unknown) {
-      if (this.isTMDbError(error) && error.response?.status === 404) {
-        throw new NotFoundException('Movie not found');
-      }
-      throw new Error('Failed to fetch movie details from TMDb');
+      this.handleTMDbError(error);
     }
   }
 
-  async getMovieById(movieId: string, userId: string): Promise<MovieDetails> {
-    const cacheKey = `movie_${movieId}`;
-    const cachedMovie = await this.cacheManager.get<MovieDetails>(cacheKey);
+  async getNowPlaying(language: string = 'pt-BR'): Promise<Movie[]> {
+    const cacheKey = this.getCacheKey('now_playing', language);
+    const cachedData = await this.cacheManager.get<Movie[]>(cacheKey);
 
-    if (cachedMovie) {
-      await this.eventsService.publishMovieViewed(userId, movieId);
-      return cachedMovie;
+    if (cachedData) {
+      return cachedData.map(movie => this.addImageUrls(movie));
     }
 
     try {
-      const url = `${this.apiUrl}/movie/${movieId}?api_key=${this.apiKey}`;
-      const response = await firstValueFrom(
-        this.httpService.get<MovieDetails>(url),
-      );
-      const movie = response.data;
+      const url = `${this.apiUrl}/movie/now_playing?api_key=${this.apiKey}&language=${language}`;
+      const { data } = await firstValueFrom(this.httpService.get<{ results: Movie[] }>(url));
 
-      await this.cacheManager.set(cacheKey, movie, this.CACHE_TTL);
-      await this.eventsService.publishMovieViewed(userId, movieId);
-
-      return movie;
+      const moviesWithFullPaths = data.results.map(movie => this.addImageUrls(movie));
+      await this.cacheManager.set(cacheKey, moviesWithFullPaths, this.CACHE_TTL);
+      
+      return moviesWithFullPaths;
     } catch (error: unknown) {
-      if (this.isTMDbError(error) && error.response?.status === 404) {
-        throw new NotFoundException('Movie not found');
-      }
-      throw error;
+      this.handleTMDbError(error);
     }
+  }
+
+  private handleTMDbError(error: unknown): never {
+    if (this.isTMDbError(error)) {
+      const status = error.response?.status;
+      const message = error.response?.data?.status_message;
+
+      switch (status) {
+        case 404:
+          throw new NotFoundException('Movie not found');
+        case 401:
+          throw new TMDbInvalidApiKeyError();
+        case 429:
+          throw new TMDbRateLimitError();
+        default:
+          throw new TMDbApiError(status, message || 'Unknown TMDb API error');
+      }
+    }
+    throw error;
   }
 
   private isTMDbError(error: unknown): error is TMDbError {
@@ -135,7 +199,7 @@ export class MoviesService {
       'response' in error &&
       typeof (error as TMDbError).response === 'object' &&
       (error as TMDbError).response !== null &&
-      'status' in (error as TMDbError).response!
+      'status' in (error as TMDbError).response
     );
   }
 } 

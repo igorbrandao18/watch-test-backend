@@ -5,6 +5,12 @@ terraform {
       version = "~> 5.0"
     }
   }
+  
+  backend "s3" {
+    bucket = "watchme-terraform-state"
+    key    = "state/terraform.tfstate"
+    region = "us-east-1"
+  }
 }
 
 provider "aws" {
@@ -144,4 +150,50 @@ resource "aws_ecs_service" "app" {
     container_name   = "${var.project_name}-app"
     container_port   = 3000
   }
+}
+
+module "vpc" {
+  source = "./modules/vpc"
+  
+  environment = var.environment
+  vpc_cidr    = var.vpc_cidr
+}
+
+module "ecs" {
+  source = "./modules/ecs"
+  
+  environment     = var.environment
+  vpc_id         = module.vpc.vpc_id
+  public_subnets = module.vpc.public_subnets
+  app_port       = var.app_port
+  app_count      = var.app_count
+  app_image      = var.app_image
+}
+
+module "rds" {
+  source = "./modules/rds"
+  
+  environment     = var.environment
+  vpc_id         = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnets
+  db_name        = var.db_name
+  db_username    = var.db_username
+  db_password    = var.db_password
+}
+
+module "redis" {
+  source = "./modules/redis"
+  
+  environment     = var.environment
+  vpc_id         = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnets
+}
+
+module "msk" {
+  source = "./modules/msk"
+  
+  environment     = var.environment
+  vpc_id         = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnets
+  kafka_version  = var.kafka_version
 } 
